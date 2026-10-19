@@ -9,7 +9,7 @@
  *   POST /files         receive one upload file
  *   POST /import        plan (dry_run) or apply a push
  *   POST /chunk         one chunk of a large upload (media file or setup package)
- *   POST /setup/start|package|activate|settings|finish   "Set up new site" steps (WPD_Setup)
+ *   POST /setup/start|package|activate|db/begin|db/rows|db/swap|finish   "Set up new site" steps (WPD_Setup, WPD_Clone)
  *
  * Local (this site's own admin screens, cookie + nonce):
  *   GET  /local/status?env=   compare with a target
@@ -63,7 +63,9 @@ class WPD_Rest {
 			array( '/setup/start', 'POST', 'setup_start', $receive ),
 			array( '/setup/package', 'POST', 'setup_package', $receive ),
 			array( '/setup/activate', 'POST', 'setup_activate', $receive ),
-			array( '/setup/settings', 'POST', 'setup_settings', $receive ),
+			array( '/setup/db/begin', 'POST', 'setup_db_begin', $receive ),
+			array( '/setup/db/rows', 'POST', 'setup_db_rows', $receive ),
+			array( '/setup/db/swap', 'POST', 'setup_db_swap', $receive ),
 			array( '/setup/finish', 'POST', 'setup_finish', $receive ),
 			array( '/local/setup/plan', 'GET', 'local_setup_plan', $local ),
 			array( '/local/setup/step', 'POST', 'local_setup_step', $local ),
@@ -131,7 +133,7 @@ class WPD_Rest {
 	}
 
 	public static function setup_start( WP_REST_Request $req ) {
-		return WPD_Setup::start( (string) $req->get_param( 'confirm' ) );
+		return WPD_Setup::start( (string) $req->get_param( 'confirm' ), (array) $req->get_param( 'needs' ) );
 	}
 
 	public static function setup_package( WP_REST_Request $req ) {
@@ -142,12 +144,23 @@ class WPD_Rest {
 		return WPD_Setup::activate( array_map( 'strval', (array) $req->get_param( 'plugins' ) ), (string) $req->get_param( 'stylesheet' ) );
 	}
 
-	public static function setup_settings( WP_REST_Request $req ) {
-		return WPD_Setup::apply_settings( (array) $req->get_param( 'options' ) );
+	public static function setup_db_begin( WP_REST_Request $req ) {
+		$ok = WPD_Setup::require_window();
+		return is_wp_error( $ok ) ? $ok : WPD_Clone::begin( (array) $req->get_param( 'source' ), (array) $req->get_param( 'tables' ), (bool) $req->get_param( 'emails' ) );
 	}
 
-	public static function setup_finish() {
-		return WPD_Setup::finish();
+	public static function setup_db_rows( WP_REST_Request $req ) {
+		$ok = WPD_Setup::require_window();
+		return is_wp_error( $ok ) ? $ok : WPD_Clone::rows( (string) $req->get_param( 'table' ), (array) $req->get_param( 'columns' ), (array) $req->get_param( 'rows' ) );
+	}
+
+	public static function setup_db_swap() {
+		$ok = WPD_Setup::require_window();
+		return is_wp_error( $ok ) ? $ok : WPD_Clone::swap();
+	}
+
+	public static function setup_finish( WP_REST_Request $req ) {
+		return WPD_Setup::finish( (string) $req->get_param( 'locale' ) );
 	}
 
 	/* ---------- local ---------- */
@@ -161,7 +174,8 @@ class WPD_Rest {
 		if ( ! $uuids ) {
 			return new WP_Error( 'wpd_empty', 'Nothing selected.', array( 'status' => 400 ) );
 		}
-		return WPD_Pusher::push( (string) $req->get_param( 'env' ), $uuids, (bool) $req->get_param( 'dry_run' ), array_map( 'strval', (array) $req->get_param( 'force' ) ) );
+		$phase = in_array( $req->get_param( 'phase' ), array( 'files', 'import' ), true ) ? $req->get_param( 'phase' ) : 'all';
+		return WPD_Pusher::push( (string) $req->get_param( 'env' ), $uuids, (bool) $req->get_param( 'dry_run' ), array_map( 'strval', (array) $req->get_param( 'force' ) ), $phase );
 	}
 
 	public static function local_setup_plan( WP_REST_Request $req ) {

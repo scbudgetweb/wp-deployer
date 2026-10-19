@@ -18,35 +18,50 @@ Nothing is ever deleted on a target.
 
 ## Set up a new site
 
-Turn a fresh WordPress install into a copy of this site in one go, instead of using a migration plugin.
+Turn a fresh WordPress install into a full copy of this site, WooCommerce and other plugin data included, instead of using a migration plugin.
 
 1. Install WordPress on the new URL and install WP Deployer there.
 2. On the new site, tick **Receive pushes** and create an application password.
 3. Add it as a target here and open **Push**. Because the target is a fresh install (no pushes yet, only WordPress's sample content, an empty media library), a **Set up new site** panel appears.
 4. Untick any theme or plugin you don't want installed, type the target's domain to confirm, and run it.
 
-Setup does the following, one step at a time with progress on screen:
+Setup runs one step at a time, with progress on screen. Long steps are split into 20-second rounds, so no single request can time out.
 
-- Installs the theme (and its parent) and the ticked plugins, using WordPress's own installer. Plugins already there at the same version are skipped.
-- Activates the plugins that are active here, and switches to this site's theme.
-- Copies site settings: title, tagline, language (installing its language pack), timezone, date formats, permalinks, reading, discussion and media sizes. Search engine visibility is left as it is on the target.
-- Pushes every enabled item plus the whole media library.
-- Deletes WordPress's sample post and page, and flushes permalinks.
+1. **Pre-flight checks.** The target checks that it can install code and that its PHP and WordPress versions meet the plugins' requirements. It also checks disk space against the size of the copy, PHP memory and time limits, that its folders are writable, and its database version. A failed check stops setup before anything changes.
+2. **Theme and plugins.** They are installed with WordPress's own installer, in 4 MB chunks. Ones already there at the same version are skipped. The plugins active here are activated, which runs their install routines.
+3. **Database.** Every table with this site's prefix is copied: core and plugin tables alike, so WooCommerce products, orders, coupons, shipping and tax, form plugins and so on all come across. The exceptions are **users and usermeta**, and WP Deployer's own tables.
+   - Each table is built under a temporary name, then all of them are swapped in with one `RENAME`.
+   - Table prefixes may differ between the sites.
+   - The target keeps its own identity: site URL, admin email, search engine visibility, salts and WP Deployer settings.
+4. **Uploads.** The whole uploads folder is copied. Executable files (`.php`, `.htaccess`…) are never copied; plugins recreate their own.
+5. **Link.** Every item is recorded as pushed, so the next Compare shows *In sync*.
+6. **Finish.**
+   - Installs the language pack, including plugin and theme translations.
+   - Switches off plugins known to break after a move, as Duplicator does: WP Rocket, Jetpack, Popup Maker, WPBakery, iThemes Security, reCAPTCHA plugins, and SSL-forcing plugins if the new site isn't on HTTPS. The screen lists each one, so you can reactivate it.
+   - Flushes permalinks and clears caches.
 
-Afterwards the site is linked, and later pushes only send changes. Large files upload in 4 MB chunks.
+**Addresses and paths** are rewritten by WPD_Replace, in every stored form:
 
-**Not copied:**
+- `https://`, `http://` and protocol-relative `//`, with or without `www.`
+- JSON-escaped and URL-encoded
+- inside serialized data (walked with its own lengths and rewritten without unserializing, so stored objects survive) and inside base64
+- server paths (`ABSPATH`, `wp-content`, uploads)
+- optionally, email addresses at the old domain
 
-- **Users.** Everything created on the new site is credited to its administrator, and the panel lists the users to recreate.
-- Must-use plugins. LiveCanvas recreates its own.
-- Data in plugins' own database tables, such as form entries.
-- `wp-config.php`.
+Matching stops at a boundary, so `site.test` never matches inside `site.testing.com`, but it still matches at the end of a sentence.
 
-For WooCommerce or membership sites, use a full migration tool instead.
+**Users are not copied.** Posts are credited to the target's administrator, and the panel lists the users to recreate. Orders keep their customer details, but registered customers' accounts must be recreated.
 
-The target refuses setup if it isn't fresh or the typed domain doesn't match. It also refuses if it can't install code: `DISALLOW_FILE_MODS`, or a host that needs FTP credentials. In that case, install the theme and plugins by hand and use a normal push.
+**Not copied:** must-use plugins (LiveCanvas recreates its own), `wp-config.php`, and other sites' tables in the same database.
 
-## How matching works
+The target refuses setup if:
+
+- it isn't fresh;
+- the typed domain doesn't match;
+- it can't install code (`DISALLOW_FILE_MODS`, or a host that needs FTP credentials);
+- it's a multisite network.
+
+## How matching works## How matching works
 
 Each pushed object gets a UUID (`_wpd_uuid` post/term meta). On the first push the target matches by post type + slug, attachment file path or menu slug, and adopts the UUID. After that, matching is by UUID.
 
@@ -59,6 +74,9 @@ IDs and URLs inside content are made portable on the way out and resolved on arr
 - ID meta keys: `_thumbnail_id`. Extend with the `wpd_id_meta_keys` filter.
 
 ## Safety
+
+- After every push (and rollback) the target clears its caches: the object cache, plus LiteSpeed, WP Rocket, W3 Total Cache, WP Super Cache, WP Fastest Cache, SiteGround, Breeze, Autoptimize, WP-Optimize, Hummingbird, Nginx Helper, Cache Enabler, Cachify, Comet Cache, Cloudflare Super Page Cache, WP Engine, GoDaddy and Elementor CSS. Hook more with `wpd_purge_caches`.
+- Files are uploaded in time-boxed rounds (and large files in chunks) before the items are applied, so big pushes don't time out.
 
 - **Preview** shows exactly what will be created, updated, left unchanged or skipped.
 - The target remembers what it last received. Each item shows *New*, *Changed here*, *In sync*, *Edited on target* or *Changed on both*. Items edited on the target are skipped unless you tick **overwrite** for that item.

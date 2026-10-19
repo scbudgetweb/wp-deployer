@@ -25,3 +25,4 @@
 .wpd .wpd-setup .wpd-pkg { display: block; margin: 6px 0; }
 .wpd .wpd-setup-log li { margin: 4px 0; }
 .wpd .wpd-fail { color: #b32d2e; }
+.wpd .wpd-warn { color: #8a4b00; }

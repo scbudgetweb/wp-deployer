@@ -21,6 +21,7 @@ define( 'WPD_URL', plugin_dir_url( __FILE__ ) );
 
 require_once WPD_DIR . 'includes/class-wpd-settings.php';
 require_once WPD_DIR . 'includes/class-wpd-sources.php';
+require_once WPD_DIR . 'includes/class-wpd-replace.php';
 require_once WPD_DIR . 'includes/class-wpd-portable.php';
 require_once WPD_DIR . 'includes/class-wpd-exporter.php';
 require_once WPD_DIR . 'includes/class-wpd-state.php';
@@ -32,6 +33,8 @@ require_once WPD_DIR . 'includes/class-wpd-rest.php';
 require_once WPD_DIR . 'includes/class-wpd-admin.php';
 require_once WPD_DIR . 'includes/class-wpd-updater.php';
 require_once WPD_DIR . 'includes/class-wpd-setup.php';
+require_once WPD_DIR . 'includes/class-wpd-clone.php';
+require_once WPD_DIR . 'includes/class-wpd-cache.php';
 
 register_activation_hook( __FILE__, array( 'WPD_History', 'install' ) );
 

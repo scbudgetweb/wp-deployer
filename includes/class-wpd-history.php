@@ -224,6 +224,7 @@ class WPD_History {
 			WPD_State::set( $row['uuid'], $data['state'] );
 			$restored[] = $row['label'];
 		}
+		WPD_Cache::purge();
 		$summary                = is_array( $push['summary'] ) ? $push['summary'] : array();
 		$summary['rolled_back'] = gmdate( 'c' );
 		self::finish( $push_id, 'rolled_back', $summary );

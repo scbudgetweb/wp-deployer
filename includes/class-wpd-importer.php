@@ -125,7 +125,12 @@ class WPD_Importer {
 		}
 		$type = wp_check_filetype( basename( $rel ) );
 		if ( ! $type['ext'] ) {
-			return new WP_Error( 'wpd_type', 'File type not allowed on this site: ' . $rel );
+			// While a new site is being set up, copy any file that isn't executable (fonts, JSON, logs, CSS caches…).
+			$ext   = strtolower( pathinfo( $rel, PATHINFO_EXTENSION ) );
+			$never = array( 'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar', 'pht', 'phps', 'cgi', 'pl', 'py', 'sh', 'exe', 'htaccess', 'htpasswd', 'ini', 'user.ini' );
+			if ( ! WPD_Setup::in_progress() || '' === $ext || in_array( $ext, $never, true ) || 0 === strpos( basename( $rel ), '.' ) ) {
+				return new WP_Error( 'wpd_type', 'File type not allowed on this site: ' . $rel );
+			}
 		}
 		return wp_get_upload_dir()['basedir'] . '/' . $rel;
 	}
@@ -193,6 +198,9 @@ class WPD_Importer {
 		$refs     = isset( $package['refs'] ) ? (array) $package['refs'] : array();
 		$descs    = array_merge( array_column( $items, 'descriptor' ), $refs );
 		$found    = self::lookup( $descs );
+		if ( ! empty( $package['link'] ) ) {
+			return self::link( $items, $found );
+		}
 		$plan     = array();
 		$warnings = array();
 
@@ -301,7 +309,9 @@ class WPD_Importer {
 				) );
 			}
 			$counts = array_count_values( array_column( $plan, 'action' ) );
+			$caches = ! empty( $counts['create'] ) || ! empty( $counts['update'] ) ? WPD_Cache::purge() : array();
 			$result = array(
+				'caches'   => $caches,
 				'push_id'  => $push_id,
 				'plan'     => array_values( $plan ),
 				'counts'   => $counts,
@@ -315,6 +325,41 @@ class WPD_Importer {
 			WPD_History::rollback( $push_id );
 			return new WP_Error( 'wpd_import', 'Push failed and was rolled back: ' . $e->getMessage(), array( 'status' => 500 ) );
 		}
+	}
+
+	/**
+	 * Record items this site already has (copied by Set up new site) as pushed, without changing them.
+	 * Only items matched by their UUID are linked.
+	 */
+	private static function link( array $items, array $found ) {
+		$protected = array_merge( WPD_Settings::INTERNAL_META, WPD_Settings::protected_meta() );
+		$linked    = 0;
+		$missing   = array();
+		foreach ( $items as $item ) {
+			$f = isset( $found[ $item['uuid'] ] ) ? $found[ $item['uuid'] ] : null;
+			if ( ! $f || ( 'site' !== $f['matched_by'] && 'uuid' !== $f['matched_by'] ) ) {
+				$missing[] = $item['label'];
+				continue;
+			}
+			$keys = array();
+			foreach ( array_keys( isset( $item['data']['meta'] ) ? (array) $item['data']['meta'] : array() ) as $key ) {
+				if ( ! WPD_Settings::matches( $key, $protected ) ) {
+					$keys[] = $key;
+				}
+			}
+			sort( $keys );
+			$pats = isset( $item['data']['patterns'] ) ? (array) $item['data']['patterns'] : array();
+			WPD_State::set( $item['uuid'], array(
+				'source_hash' => $item['hash'],
+				'local_hash'  => WPD_State::current_hash( $item['kind'], $f['id'], $keys, $pats ),
+				'meta_keys'   => $keys,
+				'patterns'    => $pats,
+				'pushed_at'   => gmdate( 'c' ),
+				'push_id'     => 0,
+			) );
+			$linked++;
+		}
+		return array( 'linked' => $linked, 'missing' => $missing );
 	}
 
 	private static function create_placeholder( array $item ) {

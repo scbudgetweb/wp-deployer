@@ -22,6 +22,23 @@ class WPD_Pusher {
 		'blocked'       => 'Blocked',
 	);
 
+	/** Mark items as pushed on a target that already has them (after Set up new site copied the database). */
+	public static function link( $env_id, array $uuids ) {
+		$client = WPD_Client::for_env( $env_id );
+		if ( is_wp_error( $client ) ) {
+			return $client;
+		}
+		$exporter = new WPD_Exporter();
+		$items    = array();
+		foreach ( $uuids as $uuid ) {
+			$item = $exporter->export_uuid( $uuid );
+			if ( $item ) {
+				$items[] = $item;
+			}
+		}
+		return $client->request( 'POST', '/import', array( 'link' => true, 'items' => $items, 'source' => array( 'home' => home_url(), 'name' => get_bloginfo( 'name' ) ) ), 300 );
+	}
+
 	public static function handshake( $env_id ) {
 		$client = WPD_Client::for_env( $env_id );
 		return is_wp_error( $client ) ? $client : $client->request( 'GET', '/handshake', null, 30 );
@@ -81,8 +98,10 @@ class WPD_Pusher {
 	 * @param string[] $uuids   selected items
 	 * @param bool     $dry_run
 	 * @param string[] $force   uuids allowed to overwrite edits made on the target
+	 * @param string   $phase   'all'; or, from the Push screen, 'files' (upload for up to 20s, repeat until
+	 *                          remaining is 0) then 'import'
 	 */
-	public static function push( $env_id, array $uuids, $dry_run, array $force = array() ) {
+	public static function push( $env_id, array $uuids, $dry_run, array $force = array(), $phase = 'all' ) {
 		$client = WPD_Client::for_env( $env_id );
 		if ( is_wp_error( $client ) ) {
 			return $client;
@@ -200,10 +219,16 @@ class WPD_Pusher {
 			}
 		}
 
-		if ( ! $dry_run && $uploads ) {
-			$remote = $client->request( 'GET', '/handshake', null, 30 );
-			$chunk  = WPD_Setup::chunk_size( is_wp_error( $remote ) ? array() : $remote );
+		if ( ! $dry_run && $uploads && 'import' !== $phase ) {
+			$remote  = $client->request( 'GET', '/handshake', null, 30 );
+			$chunk   = WPD_Setup::chunk_size( is_wp_error( $remote ) ? array() : $remote );
+			$started = microtime( true );
+			$done    = 0;
 			foreach ( $uploads as $rel => $overwrite ) {
+				if ( 'files' === $phase && microtime( true ) - $started > WPD_Clone::BUDGET ) {
+					break;
+				}
+				$done++;
 				$abs  = $basedir . '/' . $rel;
 				$body = array( 'path' => $rel, 'sha1' => $files[ $rel ], 'overwrite' => $overwrite );
 				if ( filesize( $abs ) > $chunk ) {
@@ -221,6 +246,10 @@ class WPD_Pusher {
 					$file_notes[] = $r->get_error_message();
 				}
 			}
+		}
+
+		if ( 'files' === $phase ) {
+			return array( 'phase' => 'files', 'remaining' => $dry_run ? 0 : count( $uploads ) - ( isset( $done ) ? $done : 0 ), 'uploaded' => isset( $done ) ? $done : 0, 'warnings' => $file_notes );
 		}
 
 		$in_push = array_flip( array_keys( $items ) );

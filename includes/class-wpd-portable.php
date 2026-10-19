@@ -2,9 +2,12 @@
 /**
  * Turns site-specific values into portable tokens on the sending side, and back on the receiving side.
  *
- *   https://local.test/wp-content/uploads   → {{wpd:uploads}}      (and {{wpd:uploads_esc}} for JSON-escaped "https:\/\/…")
- *   https://local.test                      → {{wpd:home}}         ({{wpd:home_esc}})
+ *   https://local.test/wp-content/uploads   → {{wpd:uploads}}      every form: _esc (JSON), _enc (URL-encoded),
+ *   https://local.test                      → {{wpd:home}}         _pr / _pr_esc / _pr_enc (protocol-relative //…)
+ *   /path/to/wp-content/uploads (and ABSPATH, wp-content) → {{wpd:path_uploads}} (_esc)   server paths
  *   a post / attachment ID inside content   → {{wpd:id:<uuid>:<local id>}}
+ *
+ * Matching and serialized strings are handled by WPD_Replace (any scheme, www. or not, on a boundary).
  *
  * IDs are recognised in: wp-image-N classes, id="attachment_N", the ID attributes of known shortcodes
  * (Forminator, LiveCanvas lc_get_post, gallery; extend with the `wpd_id_shortcodes` filter), block comment
@@ -26,20 +29,35 @@ class WPD_Portable {
 	/** descriptors of posts referenced by slug (e.g. lc_get_post slug="…"). */
 	public $slug_refs = array();
 
-	private $url_pairs;
+	/** @var WPD_Replace */
+	private $engine;
 	private $upload_index;
 	private $uploads_path;
 
+	/** name => this site's value, for each address token (longest first, so uploads wins over home). */
+	public static function site_urls() {
+		$urls = array( 'uploads' => wp_get_upload_dir()['baseurl'], 'site' => site_url(), 'home' => home_url() );
+		if ( untrailingslashit( $urls['site'] ) === untrailingslashit( $urls['home'] ) ) {
+			unset( $urls['site'] );
+		}
+		return $urls;
+	}
+
+	public static function site_paths() {
+		return array(
+			'path_uploads' => wp_get_upload_dir()['basedir'],
+			'path_content' => WP_CONTENT_DIR,
+			'path_abs'     => ABSPATH,
+		);
+	}
+
 	public function __construct() {
-		$this->url_pairs = array();
-		$uploads         = wp_get_upload_dir();
-		foreach ( array( 'uploads' => $uploads['baseurl'], 'home' => home_url() ) as $name => $url ) {
-			$url = untrailingslashit( $url );
-			$alt = 0 === strpos( $url, 'https://' ) ? 'http://' . substr( $url, 8 ) : 'https://' . substr( $url, 7 );
-			foreach ( array( $url, $alt ) as $u ) {
-				$this->url_pairs[ str_replace( '/', '\/', $u ) ] = '{{wpd:' . $name . '_esc}}';
-				$this->url_pairs[ $u ]                           = '{{wpd:' . $name . '}}';
-			}
+		$this->engine = new WPD_Replace();
+		foreach ( self::site_urls() as $name => $url ) {
+			$this->engine->add_url( $url, WPD_Replace::token_forms( $name ) );
+		}
+		foreach ( self::site_paths() as $name => $path ) {
+			$this->engine->add_path( $path, array( 'plain' => '{{wpd:' . $name . '}}', 'json' => '{{wpd:' . $name . '_esc}}' ) );
 		}
 	}
 
@@ -83,10 +101,22 @@ class WPD_Portable {
 		if ( ! is_string( $value ) || '' === $value ) {
 			return $value;
 		}
-		$value = strtr( $value, $this->url_pairs );
-		$value = $this->tokenise_ids( $value );
-		$this->collect_upload_refs( $value );
-		return $value;
+		$self = $this;
+		return WPD_Replace::map( $value, function ( $leaf ) use ( $self ) {
+			$leaf = $self->tokenise_leaf( $leaf );
+			return $leaf;
+		} );
+	}
+
+	/** @internal one plain string (WPD_Replace::map calls this for each string inside serialized data). */
+	public function tokenise_leaf( $s ) {
+		if ( ! is_string( $s ) || '' === $s ) {
+			return $s;
+		}
+		$s = $this->engine->replace_plain( $s );
+		$s = $this->tokenise_ids( $s );
+		$this->collect_upload_refs( $s );
+		return $s;
 	}
 
 	/** Token for a referenced post ID, or the ID unchanged if no such post exists. */
@@ -159,7 +189,7 @@ class WPD_Portable {
 		if ( false === strpos( $s, '{{wpd:uploads' ) && ( ! $rel_path || ( false === strpos( $s, $rel_path ) && false === strpos( $s, str_replace( '/', '\/', $rel_path ) ) ) ) ) {
 			return;
 		}
-		$prefix = '\{\{wpd:uploads(?:_esc)?\}\}';
+		$prefix = '\{\{wpd:uploads(?:_esc|_pr|_pr_esc)?\}\}';
 		if ( $rel_path ) {
 			$quoted  = preg_quote( $rel_path, '#' );
 			$prefix .= '|(?<![A-Za-z0-9._\-}])' . $quoted . '|(?<![A-Za-z0-9._\-}])' . str_replace( '/', '\\\\/', $quoted );
@@ -228,21 +258,39 @@ class WPD_Portable {
 		if ( ! is_string( $value ) || false === strpos( $value, '{{wpd:' ) ) {
 			return $value;
 		}
-		$uploads = untrailingslashit( wp_get_upload_dir()['baseurl'] );
-		$home    = untrailingslashit( home_url() );
-		$value   = strtr( $value, array(
-			'{{wpd:uploads_esc}}' => str_replace( '/', '\/', $uploads ),
-			'{{wpd:uploads}}'     => $uploads,
-			'{{wpd:home_esc}}'    => str_replace( '/', '\/', $home ),
-			'{{wpd:home}}'        => $home,
-		) );
-		return preg_replace_callback( '/\{\{wpd:id:([A-Za-z0-9_-]+):(\d+)\}\}/', function ( $m ) use ( $map, &$unresolved ) {
-			if ( isset( $map[ $m[1] ] ) ) {
-				return (string) $map[ $m[1] ];
+		$tokens = self::token_values();
+		return WPD_Replace::map( $value, function ( $leaf ) use ( $tokens, $map, &$unresolved ) {
+			if ( ! is_string( $leaf ) || false === strpos( $leaf, '{{wpd:' ) ) {
+				return $leaf;
 			}
-			$unresolved[ $m[1] ] = true;
-			return $m[2];
-		}, $value );
+			$leaf = strtr( $leaf, $tokens );
+			return preg_replace_callback( '/\{\{wpd:id:([A-Za-z0-9_-]+):(\d+)\}\}/', function ( $m ) use ( $map, &$unresolved ) {
+				if ( isset( $map[ $m[1] ] ) ) {
+					return (string) $map[ $m[1] ];
+				}
+				$unresolved[ $m[1] ] = true;
+				return $m[2];
+			}, $leaf );
+		} );
+	}
+
+	/** token => this site's value, for every address and path token. */
+	private static function token_values() {
+		static $values = null;
+		if ( null !== $values ) {
+			return $values;
+		}
+		$values = array();
+		$urls   = self::site_urls() + array( 'site' => site_url() ); // a sender with a separate site URL
+		foreach ( $urls as $name => $url ) {
+			$values += array_combine( WPD_Replace::token_forms( $name ), WPD_Replace::url_forms( $url ) );
+		}
+		foreach ( self::site_paths() as $name => $path ) {
+			$path                              = untrailingslashit( wp_normalize_path( $path ) );
+			$values[ '{{wpd:' . $name . '}}' ]     = $path;
+			$values[ '{{wpd:' . $name . '_esc}}' ] = str_replace( '/', '\/', $path );
+		}
+		return $values;
 	}
 
 	/** Stable hash of a nested value. */

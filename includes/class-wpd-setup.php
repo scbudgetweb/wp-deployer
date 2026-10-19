@@ -1,19 +1,19 @@
 <?php
 /**
  * "Set up new site": turns a fresh WordPress install into a copy of this site, then leaves it linked so later
- * pushes are incremental. Steps, each its own request so slow hosts don't time out and the screen can show
- * progress:
+ * pushes are incremental. Each step is its own request (long ones are time-boxed and repeated), so slow hosts
+ * don't time out and the screen shows progress:
  *
- *   start     target confirms it is fresh, the typed domain matches, and it may install code; a 3-hour
- *             setup window opens
- *   package   one theme or plugin, zipped here, uploaded in chunks, installed there with WordPress's own
- *             upgrader (so DISALLOW_FILE_MODS and filesystem rules apply)
- *   activate  activate the plugins that are active here, and switch to this site's theme
- *   settings  site settings (title, timezone, permalinks…); search engine visibility is left alone
- *   content   a normal push of every enabled item plus the whole media library
- *   finish    delete WordPress's sample post and page (never anything pushed), flush permalinks, close the window
+ *   start     pre-flight checks (PHP/WordPress versions, disk space, memory, writable folders, can install
+ *             code); the target must be fresh and the typed domain must match; opens a 3-hour setup window
+ *   package   one theme or plugin, zipped here, uploaded in chunks, installed with WordPress's own upgrader
+ *   activate  activate the plugins active here (runs their install routines) and switch theme
+ *   db_*      copy every table except users (WPD_Clone): begin, rows per table, then swap all in at once
+ *   uploads   copy the whole uploads folder
+ *   link      record every item as pushed, so the next Compare shows "In sync"
+ *   finish    language pack, switch off plugins that break after a move, flush permalinks, clear caches
  *
- * Users are not copied: everything created is credited to the administrator the push signs in as.
+ * Users are not copied: everything is credited to the administrator the push signs in as.
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -24,17 +24,28 @@ class WPD_Setup {
 	const WINDOW = 3 * HOUR_IN_SECONDS;
 	const CHUNK  = 4194304; // 4 MB per request (raw bytes)
 
-	/** Site settings copied by setup (never: site URL, admin email, search engine visibility). */
-	const SITE_OPTIONS = array(
-		'blogname', 'blogdescription', 'timezone_string', 'gmt_offset', 'date_format', 'time_format', 'start_of_week', 'WPLANG',
-		'permalink_structure', 'category_base', 'tag_base', 'posts_per_page', 'posts_per_rss', 'rss_use_excerpt',
-		'default_comment_status', 'default_ping_status', 'comment_registration', 'require_name_email', 'comment_moderation',
-		'comment_previously_approved', 'close_comments_for_old_posts', 'close_comments_days_old', 'thread_comments',
-		'thread_comments_depth', 'page_comments', 'comments_per_page', 'default_comments_page', 'comment_order',
-		'show_avatars', 'avatar_rating', 'avatar_default', 'thumbnail_size_w', 'thumbnail_size_h', 'thumbnail_crop',
-		'medium_size_w', 'medium_size_h', 'medium_large_size_w', 'medium_large_size_h', 'large_size_w', 'large_size_h',
-		'uploads_use_yearmonth_folders', 'image_default_link_type', 'image_default_size', 'image_default_align',
+	/**
+	 * Plugins switched off after a setup, as Duplicator does: they cache or tie themselves to the old
+	 * domain, or are known to break the site right after a move. slug => reason. SSL-forcing plugins are only
+	 * switched off when the new site isn't on HTTPS.
+	 */
+	const RISKY_PLUGINS = array(
+		'wp-rocket/wp-rocket.php'                             => 'page cache built for the old address',
+		'jetpack/jetpack.php'                                 => 'its WordPress.com connection is tied to the old address',
+		'popup-maker/popup-maker.php'                         => 'known to break right after a move',
+		'js_composer/js_composer.php'                         => 'WPBakery needs reactivating after a move',
+		'woocommerce-admin/woocommerce-admin.php'             => 'known to break right after a move',
+		'better-wp-security/better-wp-security.php'           => 'security rules can lock you out on a new host',
+		'simple-google-recaptcha/simple-google-recaptcha.php' => 'reCAPTCHA keys are tied to the old domain',
+		'login-recaptcha/login-nocaptcha.php'                 => 'reCAPTCHA keys are tied to the old domain',
+		'google-captcha/google-captcha.php'                   => 'reCAPTCHA keys are tied to the old domain',
+		'advanced-google-recaptcha/advanced-google-recaptcha.php' => 'reCAPTCHA keys are tied to the old domain',
 	);
+	const SSL_PLUGINS = array(
+		'really-simple-ssl/rlrsssl-really-simple-ssl.php', 'one-click-ssl/ssl.php', 'wp-force-ssl/wp-force-ssl.php',
+		'https-redirection/https-redirection.php',
+	);
+
 
 	/* ===================================================================== receiving side */
 
@@ -75,6 +86,9 @@ class WPD_Setup {
 
 	/** Why this site can't install code, or '' if it can. */
 	public static function install_blocker() {
+		if ( is_multisite() ) {
+			return 'Multisite networks aren\'t supported by Set up new site.';
+		}
 		if ( ! current_user_can( 'install_plugins' ) || ! current_user_can( 'install_themes' ) || ! current_user_can( 'activate_plugins' ) || ! current_user_can( 'switch_themes' ) ) {
 			return 'The signed-in user may not install or activate plugins and themes.';
 		}
@@ -104,7 +118,50 @@ class WPD_Setup {
 		return array( 'plugins' => $plugins, 'themes' => $themes, 'stylesheet' => get_stylesheet() );
 	}
 
-	public static function start( $confirm_host ) {
+	/**
+	 * Pre-flight checks against what the sender needs.
+	 *
+	 * @param array $needs php (highest Requires PHP), wp (highest Requires at least), bytes (packages + uploads + database), mysql
+	 * @return array[] each: level (ok|warn|fail), label, detail
+	 */
+	public static function preflight( array $needs ) {
+		global $wpdb;
+		$checks = array();
+		$add    = function ( $level, $label, $detail ) use ( &$checks ) {
+			$checks[] = array( 'level' => $level, 'label' => $label, 'detail' => $detail );
+		};
+		$blocker = self::install_blocker();
+		$add( $blocker ? 'fail' : 'ok', 'Can install plugins and themes', $blocker ? $blocker : 'Yes' );
+		if ( ! empty( $needs['php'] ) ) {
+			$ok = version_compare( PHP_VERSION, $needs['php'], '>=' );
+			$add( $ok ? 'ok' : 'fail', 'PHP version', 'This server runs PHP ' . PHP_VERSION . ( $ok ? '' : '; the plugins need ' . $needs['php'] . ' or newer. Change the PHP version in the hosting control panel.' ) );
+		}
+		if ( ! empty( $needs['wp'] ) ) {
+			$ok = version_compare( get_bloginfo( 'version' ), $needs['wp'], '>=' );
+			$add( $ok ? 'ok' : 'warn', 'WordPress version', 'WordPress ' . get_bloginfo( 'version' ) . ( $ok ? '' : '; some plugins want ' . $needs['wp'] . ' or newer. Update WordPress first.' ) );
+		}
+		$free = function_exists( 'disk_free_space' ) ? @disk_free_space( WP_CONTENT_DIR ) : false; // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		if ( false !== $free && ! empty( $needs['bytes'] ) ) {
+			$need  = (float) $needs['bytes'];
+			$level = $free < $need * 1.2 ? 'fail' : ( $free < $need * 2 ? 'warn' : 'ok' );
+			$add( $level, 'Disk space', size_format( $free ) . ' free; the copy needs about ' . size_format( $need ) . '.' );
+		}
+		$mem = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
+		$add( $mem > 0 && $mem < 128 * MB_IN_BYTES ? 'warn' : 'ok', 'PHP memory', ini_get( 'memory_limit' ) . ( $mem > 0 && $mem < 128 * MB_IN_BYTES ? ' (128M or more is safer)' : '' ) );
+		$time = (int) ini_get( 'max_execution_time' );
+		$add( $time > 0 && $time < 30 ? 'warn' : 'ok', 'PHP time limit', ( $time ? $time . 's' : 'none' ) . ( $time > 0 && $time < 30 ? ' (30s or more is safer)' : '' ) );
+		foreach ( array( 'Plugins folder' => WP_PLUGIN_DIR, 'Themes folder' => get_theme_root(), 'Uploads folder' => wp_get_upload_dir()['basedir'] ) as $label => $dir ) {
+			wp_mkdir_p( $dir );
+			$add( wp_is_writable( $dir ) ? 'ok' : 'fail', $label . ' writable', wp_is_writable( $dir ) ? 'Yes' : $dir . ' is not writable.' );
+		}
+		if ( ! empty( $needs['mysql'] ) ) {
+			$mine = $wpdb->db_version();
+			$add( version_compare( $mine, $needs['mysql'], '>=' ) ? 'ok' : 'warn', 'Database version', 'MySQL/MariaDB ' . $mine . ( version_compare( $mine, $needs['mysql'], '>=' ) ? '' : ' (older than this site\'s ' . $needs['mysql'] . '; tables may fall back to another collation)' ) );
+		}
+		return $checks;
+	}
+
+	public static function start( $confirm_host, array $needs = array() ) {
 		$fresh = self::freshness();
 		if ( ! $fresh['fresh'] && ! $fresh['in_progress'] ) {
 			return new WP_Error( 'wpd_not_fresh', 'This site is not a fresh install: ' . implode( ' ', $fresh['reasons'] ), array( 'status' => 409 ) );
@@ -113,15 +170,19 @@ class WPD_Setup {
 		if ( strtolower( trim( (string) $confirm_host ) ) !== $host ) {
 			return new WP_Error( 'wpd_confirm', 'The domain typed doesn\'t match this site (' . $host . ').', array( 'status' => 400 ) );
 		}
-		$blocker = self::install_blocker();
-		if ( $blocker ) {
-			return new WP_Error( 'wpd_cannot_install', $blocker, array( 'status' => 403 ) );
+		$checks = self::preflight( $needs );
+		$failed = array_filter( $checks, function ( $c ) {
+			return 'fail' === $c['level'];
+		} );
+		if ( $failed ) {
+			return array( 'ok' => false, 'checks' => $checks );
 		}
+		WPD_Clone::cleanup();
 		update_option( self::FLAG, array( 'started' => time(), 'by' => wp_get_current_user()->user_login ), false );
-		return array( 'ok' => true, 'inventory' => self::inventory() );
+		return array( 'ok' => true, 'checks' => $checks, 'inventory' => self::inventory() );
 	}
 
-	private static function require_window() {
+	public static function require_window() {
 		return self::in_progress() ? true : new WP_Error( 'wpd_no_setup', 'No site setup is in progress here (it may have timed out). Start again.', array( 'status' => 409 ) );
 	}
 
@@ -247,64 +308,56 @@ class WPD_Setup {
 		return array( 'activated' => $done, 'failed' => $failed, 'theme' => get_stylesheet() );
 	}
 
-	public static function apply_settings( array $options ) {
-		$ok = self::require_window();
-		if ( is_wp_error( $ok ) ) {
-			return $ok;
-		}
-		global $wp_rewrite;
-		$set = array();
-		foreach ( $options as $name => $value ) {
-			if ( ! in_array( $name, self::SITE_OPTIONS, true ) ) {
-				continue;
-			}
-			if ( 'permalink_structure' === $name ) {
-				$wp_rewrite->set_permalink_structure( $value );
-			} elseif ( 'category_base' === $name ) {
-				$wp_rewrite->set_category_base( $value );
-			} elseif ( 'tag_base' === $name ) {
-				$wp_rewrite->set_tag_base( $value );
-			} else {
-				update_option( $name, $value );
-			}
-			$set[] = $name;
-		}
-		$lang = isset( $options['WPLANG'] ) ? (string) $options['WPLANG'] : '';
-		$pack = null;
-		if ( '' !== $lang && 'en_US' !== $lang ) {
-			require_once ABSPATH . 'wp-admin/includes/translation-install.php';
-			require_once ABSPATH . 'wp-admin/includes/file.php';
-			$pack = wp_download_language_pack( $lang );
-			if ( $pack ) {
-				update_option( 'WPLANG', $pack );
-			}
-		}
-		self::flush_permalinks();
-		return array( 'set' => $set, 'language' => '' === $lang ? null : ( $pack ? $pack : 'Could not install the ' . $lang . ' language pack; install it under Settings › General.' ) );
-	}
-
 	private static function flush_permalinks() {
 		require_once ABSPATH . 'wp-admin/includes/misc.php';
 		require_once ABSPATH . 'wp-admin/includes/file.php';
 		flush_rewrite_rules( true );
 	}
 
-	public static function finish() {
+	public static function finish( $locale = '' ) {
 		$ok = self::require_window();
 		if ( is_wp_error( $ok ) ) {
 			return $ok;
 		}
-		$deleted = array();
-		foreach ( array( 'post' => 'hello-world', 'page' => 'sample-page' ) as $type => $slug ) {
-			$p = get_page_by_path( $slug, OBJECT, $type );
-			if ( $p && ! get_post_meta( $p->ID, WPD_Sources::UUID_META, true ) ) {
-				wp_delete_post( $p->ID, true );
-				$deleted[] = $p->post_title;
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		$language = null;
+		if ( '' !== $locale && 'en_US' !== $locale ) {
+			require_once ABSPATH . 'wp-admin/includes/translation-install.php';
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			$pack     = wp_download_language_pack( $locale );
+			$language = $pack ? $pack : 'Could not install the ' . $locale . ' language pack; install it under Settings › General.';
+			if ( $pack ) {
+				update_option( 'WPLANG', $pack );
+				// Plugin and theme translations too (Dashboard › Updates would offer them otherwise).
+				require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+				require_once ABSPATH . 'wp-admin/includes/update.php';
+				wp_clean_update_cache();
+				wp_update_plugins();
+				wp_update_themes();
+				$updates = wp_get_translation_updates();
+				if ( $updates ) {
+					ob_start();
+					( new Language_Pack_Upgrader( new Automatic_Upgrader_Skin() ) )->bulk_upgrade( $updates );
+					ob_end_clean();
+				}
+			}
+		}
+		$off   = array();
+		$risky = self::RISKY_PLUGINS;
+		if ( ! is_ssl() && 0 !== strpos( home_url(), 'https://' ) ) {
+			$risky += array_fill_keys( self::SSL_PLUGINS, 'this site isn\'t on HTTPS yet, so forcing SSL would lock you out' );
+		}
+		foreach ( $risky as $file => $why ) {
+			if ( is_plugin_active( $file ) ) {
+				deactivate_plugins( $file, true );
+				$off[] = array( 'plugin' => $file, 'reason' => $why );
 			}
 		}
 		self::flush_permalinks();
+		$caches = WPD_Cache::purge();
+		WPD_Clone::cleanup();
 		delete_option( self::FLAG );
-		return array( 'deleted' => $deleted, 'home' => home_url( '/' ) );
+		return array( 'language' => $language, 'deactivated' => $off, 'caches' => $caches, 'home' => home_url( '/' ) );
 	}
 
 	/* ===================================================================== sending side */
@@ -362,6 +415,7 @@ class WPD_Setup {
 			'items'       => count( WPD_Sources::list_items() ),
 			'media'       => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'" ),
 			'host'        => wp_parse_url( $remote['home'], PHP_URL_HOST ),
+			'local_host'  => preg_replace( '/^www\./', '', (string) wp_parse_url( home_url(), PHP_URL_HOST ) ),
 			'mu_plugins'  => array_keys( get_mu_plugins() ),
 		);
 	}
@@ -447,6 +501,38 @@ class WPD_Setup {
 		return $max > 0 ? max( 262144, min( self::CHUNK, (int) floor( $max * 0.6 / 1.37 ) ) ) : self::CHUNK;
 	}
 
+	/** What the target needs to have, for the pre-flight checks. */
+	private static function needs( array $keys ) {
+		global $wpdb;
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		$php   = '';
+		$wp    = '';
+		$bytes = 0;
+		foreach ( $keys as $key ) {
+			list( $type, $id ) = explode( ':', $key, 2 );
+			if ( 'plugin' === $type ) {
+				$data = get_plugin_data( WP_PLUGIN_DIR . '/' . $id, false, false );
+				$dir  = false !== strpos( $id, '/' ) ? WP_PLUGIN_DIR . '/' . dirname( $id ) : WP_PLUGIN_DIR . '/' . $id;
+			} else {
+				$t    = wp_get_theme( $id );
+				$data = array( 'RequiresPHP' => $t->get( 'RequiresPHP' ), 'RequiresWP' => $t->get( 'RequiresWP' ) );
+				$dir  = $t->get_stylesheet_directory();
+			}
+			if ( ! empty( $data['RequiresPHP'] ) && version_compare( $data['RequiresPHP'], $php, '>' ) ) {
+				$php = $data['RequiresPHP'];
+			}
+			if ( ! empty( $data['RequiresWP'] ) && version_compare( $data['RequiresWP'], $wp, '>' ) ) {
+				$wp = $data['RequiresWP'];
+			}
+			$bytes += self::dir_size( $dir );
+		}
+		$bytes += array_sum( WPD_Clone::upload_files() );
+		$bytes += (int) $wpdb->get_var( $wpdb->prepare( 'SELECT SUM(data_length + index_length) FROM information_schema.TABLES WHERE table_schema = %s AND table_name LIKE %s', DB_NAME, $wpdb->esc_like( $wpdb->prefix ) . '%' ) );
+		return array( 'php' => $php, 'wp' => $wp, 'bytes' => $bytes, 'mysql' => preg_replace( '/[^0-9.].*$/', '', $wpdb->db_version() ) );
+	}
+
 	/** Run one setup step for the sender's screen. */
 	public static function step( $env_id, $step, array $args ) {
 		$client = WPD_Client::for_env( $env_id );
@@ -454,11 +540,12 @@ class WPD_Setup {
 			return $client;
 		}
 		if ( function_exists( 'set_time_limit' ) ) {
-			@set_time_limit( 900 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		}
 		switch ( $step ) {
 			case 'start':
-				return $client->request( 'POST', '/setup/start', array( 'confirm' => isset( $args['confirm'] ) ? $args['confirm'] : '' ) );
+				$keys = array_map( 'strval', isset( $args['packages'] ) ? (array) $args['packages'] : array() );
+				return $client->request( 'POST', '/setup/start', array( 'confirm' => isset( $args['confirm'] ) ? $args['confirm'] : '', 'needs' => self::needs( $keys ) ) );
 
 			case 'package':
 				$key = isset( $args['key'] ) ? (string) $args['key'] : '';
@@ -481,29 +568,50 @@ class WPD_Setup {
 				if ( ! function_exists( 'get_plugins' ) ) {
 					require_once ABSPATH . 'wp-admin/includes/plugin.php';
 				}
-				$want    = array_map( 'strval', isset( $args['plugins'] ) ? (array) $args['plugins'] : array() );
-				$active  = array_values( array_filter( $want, 'is_plugin_active' ) );
+				$want   = array_map( 'strval', isset( $args['plugins'] ) ? (array) $args['plugins'] : array() );
+				$active = array_values( array_filter( $want, 'is_plugin_active' ) );
 				return $client->request( 'POST', '/setup/activate', array( 'plugins' => $active, 'stylesheet' => get_stylesheet() ), 300 );
 
-			case 'settings':
-				$options = array();
-				foreach ( self::SITE_OPTIONS as $name ) {
-					$options[ $name ] = get_option( $name );
+			case 'db_begin':
+				// Make sure every item has its UUID before the tables are copied, so the copy is already matched.
+				global $wpdb;
+				WPD_Sources::list_items();
+				foreach ( $wpdb->get_col( "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment'" ) as $att ) {
+					WPD_Sources::post_uuid( (int) $att );
 				}
-				// The option can be empty while the site still runs in another language (set by a filter or constant).
-				$options['WPLANG'] = 'en_US' === get_locale() ? '' : get_locale();
-				return $client->request( 'POST', '/setup/settings', array( 'options' => $options ), 120 );
+				$tables = WPD_Clone::tables();
+				$r      = $client->request( 'POST', '/setup/db/begin', array(
+					'source' => WPD_Clone::source_info(),
+					'tables' => array_column( $tables, 'create', 'suffix' ),
+					'emails' => ! empty( $args['emails'] ),
+				), 300 );
+				if ( is_wp_error( $r ) ) {
+					return $r;
+				}
+				foreach ( $tables as &$t ) {
+					unset( $t['create'] );
+				}
+				return array_merge( $r, array( 'tables' => $tables ) );
 
-			case 'content':
+			case 'db_table':
+				return WPD_Clone::send_rows( $client, (string) $args['table'], (int) $args['offset'] );
+
+			case 'db_swap':
+				return $client->request( 'POST', '/setup/db/swap', array(), 300 );
+
+			case 'uploads':
+				return WPD_Clone::send_uploads( $client, isset( $args['cursor'] ) ? (int) $args['cursor'] : 0 );
+
+			case 'link':
 				global $wpdb;
 				$uuids = array_column( WPD_Sources::list_items(), 'uuid' );
 				foreach ( $wpdb->get_col( "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment'" ) as $att ) {
 					$uuids[] = WPD_Sources::post_uuid( (int) $att );
 				}
-				return WPD_Pusher::push( $env_id, $uuids, false );
+				return WPD_Pusher::link( $env_id, $uuids );
 
 			case 'finish':
-				return $client->request( 'POST', '/setup/finish', array(), 120 );
+				return $client->request( 'POST', '/setup/finish', array( 'locale' => 'en_US' === get_locale() ? '' : get_locale() ), 300 );
 		}
 		return new WP_Error( 'wpd_step', 'Unknown setup step.', array( 'status' => 400 ) );
 	}
