@@ -40,6 +40,12 @@
 		}
 	}
 
+	/** The target's name from Settings (its site title may be a copy of this site's). */
+	function envName() {
+		const e = ( WPD.envs || [] ).find( ( x ) => x.id === env.value );
+		return e ? e.name : target.name;
+	}
+
 	function selected() {
 		return [ ...list.querySelectorAll( 'input.wpd-pick:checked' ) ].map( ( c ) => c.value );
 	}
@@ -65,7 +71,7 @@
 					'<td><span class="wpd-badge wpd-' + it.sync + '">' + esc( it.sync_label ) + '</span>' +
 					( risky ? '<label class="wpd-force-label"><input type="checkbox" class="wpd-force" value="' + esc( it.uuid ) + '"> overwrite</label>' : '' ) + '</td>' +
 					'<td>' + ( it.pushed_at ? esc( it.pushed_at.replace( 'T', ' ' ).slice( 0, 16 ) ) : '—' ) + '</td>' +
-					'<td>' + ( it.remote_link ? '<a href="' + esc( it.remote_link ) + '" target="_blank" rel="noopener">on ' + esc( target.name ) + ' ↗</a>' : '' ) + '</td></tr>';
+					'<td>' + ( it.remote_link ? '<a href="' + esc( it.remote_link ) + '" target="_blank" rel="noopener">on ' + esc( envName() ) + ' ↗</a>' : '' ) + '</td></tr>';
 			} );
 			html += '</tbody></table>';
 		} );
@@ -86,7 +92,7 @@
 			target = r.remote;
 			const counts = {};
 			items.forEach( ( it ) => ( counts[ it.sync_label ] = ( counts[ it.sync_label ] || 0 ) + 1 ) );
-			let text = 'Connected to <strong>' + esc( target.name ) + '</strong> (' + esc( target.home ) + ', WP Deployer ' + esc( target.plugin ) + '). ' +
+			let text = 'Connected to <strong>' + esc( envName() ) + '</strong> (' + esc( target.home ) + ', WP Deployer ' + esc( target.plugin ) + '). ' +
 				Object.entries( counts ).map( ( [ k, v ] ) => v + ' ' + esc( k.toLowerCase() ) ).join( ' · ' );
 			if ( target.stylesheet !== r.local_stylesheet ) {
 				text += '<br><strong>Its active theme is ' + esc( target.stylesheet ) + ', not ' + esc( r.local_stylesheet ) + ':</strong> theme settings, Additional CSS and the CSS bundle will be skipped.';
@@ -143,7 +149,7 @@
 			notice( 'Tick at least one item.', 'warning' );
 			return;
 		}
-		busy( true, dry ? 'Working out what would change…' : 'Pushing ' + uuids.length + ' item(s) to ' + target.name + '…' );
+		busy( true, dry ? 'Working out what would change…' : 'Pushing ' + uuids.length + ' item(s) to ' + envName() + '…' );
 		try {
 			const body = { env: env.value, uuids, dry_run: dry, force: forced() };
 			if ( ! dry ) {
@@ -293,14 +299,15 @@
 			l = line( 'Copying the uploads folder' );
 			let cursor = 0;
 			let uploaded = 0;
+			let protectedSkipped = 0;
 			for ( ;; ) {
 				const u = await step( 'uploads', { cursor } );
 				cursor = u.cursor;
 				uploaded += u.uploaded;
-				( u.skipped || [] ).forEach( ( f ) => notes.push( 'Not copied: uploads/' + f ) );
+				( u.skipped || [] ).forEach( ( f ) => ( /(^|\/)(\.htaccess|index\.php)$/.test( f ) ? protectedSkipped++ : notes.push( 'Not copied: uploads/' + f ) ) );
 				l.set( 'Copying the uploads folder: ' + cursor + ' of ' + u.total + ' file(s)' );
 				if ( u.done ) {
-					l.ok( 'Copied ' + uploaded + ' upload file(s) (' + u.total + ' checked)' );
+					l.ok( 'Copied ' + uploaded + ' upload file(s) (' + u.total + ' checked)' + ( protectedSkipped ? '; left out ' + protectedSkipped + ' protection file(s) (.htaccess, index.php), which their plugins recreate' : '' ) );
 					break;
 				}
 			}
@@ -319,7 +326,8 @@
 
 			const keep = '<div class="wpd-panel"><h2>' + esc( plan.remote.name ) + ' is set up</h2><p><a href="' + esc( f.home ) + '" target="_blank" rel="noopener">Open ' + esc( f.home ) + ' ↗</a></p>' +
 				( notes.length ? '<div class="notice notice-warning inline"><ul>' + notes.map( ( w ) => '<li>' + esc( w ) + '</li>' ).join( '' ) + '</ul></div>' : '' ) +
-				'<p>Users were not copied: recreate any you need there (Users › Add New). From now on, push changes as usual.</p></div>';
+				'<p>Users were not copied: recreate any you need there (Users › Add New). From now on, push changes as usual.</p>' +
+				'<details open><summary>What setup did</summary>' + log.outerHTML.replace( 'id="wpd-setup-log"', '' ) + '</details></div>';
 			await load();
 			out.innerHTML = keep;
 		} catch ( e ) {
@@ -351,7 +359,7 @@
 		}
 		if ( ! btn.push.dataset.armed ) {
 			btn.push.dataset.armed = '1';
-			btn.push.textContent = 'Confirm push to ' + ( target ? target.name : 'target' );
+			btn.push.textContent = 'Confirm push to ' + ( target ? envName() : 'target' );
 			armTimer = setTimeout( disarm, 6000 );
 			return;
 		}

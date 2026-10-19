@@ -186,7 +186,7 @@ class WPD_Admin {
 			foreach ( $groups as $group => $sources ) {
 				echo '<fieldset><legend>' . esc_html( $group ) . '</legend>';
 				foreach ( $sources as $src ) {
-					$on = WPD_Settings::source_enabled( $src['key'] );
+					$on = $src['available'] && WPD_Settings::source_enabled( $src['key'] );
 					echo '<label class="' . ( $src['available'] ? '' : 'wpd-unavailable' ) . '"><input type="hidden" name="sources[' . esc_attr( $src['key'] ) . ']" value="0">';
 					echo '<input type="checkbox" name="sources[' . esc_attr( $src['key'] ) . ']" value="1" ' . checked( $on, true, false ) . disabled( ! $src['available'], true, false ) . '> ';
 					echo '<strong>' . esc_html( $src['label'] ) . '</strong> <span class="count">(' . (int) $src['count'] . ')</span>';

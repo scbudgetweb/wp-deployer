@@ -362,8 +362,15 @@ class WPD_Setup {
 
 	/* ===================================================================== sending side */
 
+	/** Admin helpers setup uses (REST requests don't load them; WP-CLI does, which hides the difference). */
+	private static function includes() {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+	}
+
 	/** What setup would send, and what the target reports. */
 	public static function plan( $env_id ) {
+		self::includes();
 		$remote = WPD_Pusher::handshake( $env_id );
 		if ( is_wp_error( $remote ) ) {
 			return $remote;
@@ -535,6 +542,7 @@ class WPD_Setup {
 
 	/** Run one setup step for the sender's screen. */
 	public static function step( $env_id, $step, array $args ) {
+		self::includes();
 		$client = WPD_Client::for_env( $env_id );
 		if ( is_wp_error( $client ) ) {
 			return $client;

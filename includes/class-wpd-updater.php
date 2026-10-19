@@ -157,6 +157,7 @@ class WPD_Updater {
 		if ( is_wp_error( $res ) || ! in_array( $code, array( 301, 302, 303, 307, 308 ), true ) || ! $location ) {
 			return new WP_Error( 'wpd_download', 'Could not download the WP Deployer update from GitHub' . ( is_wp_error( $res ) ? ': ' . $res->get_error_message() : ' (HTTP ' . $code . ').' ) );
 		}
+		require_once ABSPATH . 'wp-admin/includes/file.php';
 		$tmp = wp_tempnam( 'wp-deployer.zip' );
 		$get = wp_remote_get( $location, array( 'timeout' => 300, 'stream' => true, 'filename' => $tmp ) );
 		if ( is_wp_error( $get ) || 200 !== wp_remote_retrieve_response_code( $get ) ) {

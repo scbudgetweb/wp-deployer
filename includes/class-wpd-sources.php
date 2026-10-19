@@ -27,6 +27,8 @@ class WPD_Sources {
 	const EXCLUDED_TYPES = array(
 		'attachment', 'revision', 'nav_menu_item', 'custom_css', 'customize_changeset', 'oembed_cache', 'user_request',
 		'wp_font_family', 'wp_font_face', 'scheduled-action',
+		// Shop data written on the live site: never pushed (Set up new site copies it once).
+		'shop_order', 'shop_order_refund', 'shop_order_placehold', 'shop_subscription', 'wc_user_membership', 'wc_membership_plan',
 	);
 
 	const DEFAULT_ON = array(

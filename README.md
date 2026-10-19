@@ -2,6 +2,8 @@
 
 Push content and design changes from one WordPress site to another (local → staging → production) item by item, without replacing the receiving site's database. Form entries, users, comments, SEO data and plugin activation on the receiving site are left alone.
 
+![The Push screen: what differs between this site and Staging](docs/screenshots/push-compare.png)
+
 ## What it pushes
 
 Sources are detected from the plugins and theme on the site and switched on or off in **WP Deployer › Settings**:
@@ -19,6 +21,8 @@ Nothing is ever deleted on a target.
 ## Set up a new site
 
 Turn a fresh WordPress install into a full copy of this site, WooCommerce and other plugin data included, instead of using a migration plugin.
+
+![The Set up new site panel](docs/screenshots/setup-panel.png)
 
 1. Install WordPress on the new URL and install WP Deployer there.
 2. On the new site, tick **Receive pushes** and create an application password.
@@ -40,6 +44,8 @@ Setup runs one step at a time, with progress on screen. Long steps are split int
    - Switches off plugins known to break after a move, as Duplicator does: WP Rocket, Jetpack, Popup Maker, WPBakery, iThemes Security, reCAPTCHA plugins, and SSL-forcing plugins if the new site isn't on HTTPS. The screen lists each one, so you can reactivate it.
    - Flushes permalinks and clears caches.
 
+![Setup finished, with a log of what it did](docs/screenshots/setup-done.png)
+
 **Addresses and paths** are rewritten by WPD_Replace, in every stored form:
 
 - `https://`, `http://` and protocol-relative `//`, with or without `www.`
@@ -60,6 +66,26 @@ The target refuses setup if:
 - the typed domain doesn't match;
 - it can't install code (`DISALLOW_FILE_MODS`, or a host that needs FTP credentials);
 - it's a multisite network.
+
+## Pushing changes
+
+1. **Compare** shows every enabled item and how it stands against the target (screenshot at the top).
+2. **Select all changes** ticks what's new or changed here. Items edited on the target are left unticked, and need **overwrite** ticked to replace them.
+3. **Preview push** shows exactly what would happen.
+
+   ![Preview of a push](docs/screenshots/push-preview.png)
+
+4. **Push** asks for a second click to confirm, then reports what was done.
+
+   ![A finished push](docs/screenshots/push-done.png)
+
+Every push is listed on the target under **WP Deployer › History**, where it can be rolled back:
+
+![Received pushes on the target, with Roll back](docs/screenshots/history.png)
+
+**Settings** lists what can be pushed, grouped by the plugin that registered it:
+
+![Settings: targets and the detected content sources](docs/screenshots/settings.png)
 
 ## How matching works## How matching works
 
