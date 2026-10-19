@@ -1,0 +1,23 @@
+.wpd .wpd-intro { max-width: 60em; }
+.wpd .wpd-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
+.wpd .wpd-bar .wpd-spacer { flex: 1; }
+.wpd .wpd-table { margin-bottom: 16px; }
+.wpd .wpd-table td, .wpd .wpd-table th { vertical-align: middle; }
+.wpd .wpd-row-synced td { color: #646970; }
+.wpd .wpd-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; line-height: 18px; background: #f0f0f1; color: #1d2327; white-space: nowrap; }
+.wpd .wpd-new, .wpd .wpd-act-create { background: #e7f5ea; color: #00691f; }
+.wpd .wpd-changed, .wpd .wpd-act-update { background: #e5f0fa; color: #0a4b78; }
+.wpd .wpd-synced, .wpd .wpd-act-unchanged, .wpd .wpd-done { background: #f0f0f1; color: #50575e; }
+.wpd .wpd-remote_edited, .wpd .wpd-unlinked, .wpd .wpd-act-skip, .wpd .wpd-rolled_back { background: #fcf3e3; color: #8a4b00; }
+.wpd .wpd-conflict, .wpd .wpd-blocked, .wpd .wpd-failed { background: #fcebea; color: #8a1f11; }
+.wpd .wpd-force-label { margin-left: 8px; font-size: 12px; }
+.wpd .wpd-panel { background: #fff; border: 1px solid #c3c4c7; padding: 4px 16px 12px; margin-top: 16px; }
+.wpd .spinner { float: none; margin: 0 4px 0 0; vertical-align: middle; }
+.wpd .wpd-envs input[type="text"], .wpd .wpd-envs input[type="password"] { width: 100%; }
+.wpd .wpd-sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.wpd .wpd-sources fieldset { background: #fff; border: 1px solid #c3c4c7; padding: 8px 14px 12px; }
+.wpd .wpd-sources legend { font-weight: 600; padding: 0 4px; }
+.wpd .wpd-sources label { display: block; margin: 8px 0; }
+.wpd .wpd-sources .count { color: #646970; }
+.wpd .wpd-unavailable { opacity: .55; }
+.wpd .wpd-history details { margin-top: 4px; }
