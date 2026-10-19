@@ -228,6 +228,9 @@ class WPD_Admin {
 			<h2>Plugin updates</h2>
 			<?php
 			$release = WPD_Updater::latest();
+			if ( WPD_Updater::is_checkout() ) {
+				echo '<p class="description">This copy is a git checkout, so WordPress won\'t offer updates for it. Use git here.</p>';
+			}
 			if ( is_wp_error( $release ) ) {
 				echo '<p class="description"><span class="wpd-badge wpd-failed">Can\'t check</span> ' . esc_html( $release->get_error_message() ) . '</p>';
 			} else {

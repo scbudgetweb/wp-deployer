@@ -87,8 +87,13 @@ class WPD_Updater {
 		return $release;
 	}
 
+	/** A git checkout (the development copy) is updated with git, never replaced by a release zip. */
+	public static function is_checkout() {
+		return file_exists( WPD_DIR . '.git' );
+	}
+
 	public static function inject( $transient ) {
-		if ( ! is_object( $transient ) ) {
+		if ( ! is_object( $transient ) || self::is_checkout() ) {
 			return $transient;
 		}
 		$release = self::latest();
