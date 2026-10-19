@@ -2,17 +2,19 @@
 /**
  * Plugin Name:       WP Deployer
  * Description:       Push content and design changes (pages, builder partials, forms, menus, CSS, theme settings, media) from one WordPress site to another, item by item, without overwriting the receiving site's database.
- * Version:           0.2.0
+ * Version:           0.2.1
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Shaun Corness
  * Text Domain:       wp-deployer
  * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+ * Update URI:        https://github.com/scbudgetweb/wp-deployer
  */
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WPD_VERSION', '0.2.0' );
+define( 'WPD_VERSION', '0.2.1' );
 define( 'WPD_FILE', __FILE__ );
 define( 'WPD_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPD_URL', plugin_dir_url( __FILE__ ) );

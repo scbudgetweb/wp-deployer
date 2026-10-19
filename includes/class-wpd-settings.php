@@ -68,6 +68,7 @@ class WPD_Settings {
 		'*_user_roles', 'cron', 'rewrite_rules', 'db_version', 'initial_db_version', 'wpd_*', 'theme_mods_*', 'auth_*',
 		'secure_auth_*', 'logged_in_*', 'nonce_*', '_transient_*', '_site_transient_*', '*_key', '*_apikey', '*_api_key',
 		'*_secret', '*_token', '*password*', 'recently_activated', 'uninstall_plugins', 'fresh_site',
+		'default_role', 'users_can_register', 'upload_path', 'upload_url_path',
 	);
 
 	public static function option_patterns() {

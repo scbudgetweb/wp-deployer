@@ -49,18 +49,19 @@ The target must use HTTPS, which WordPress requires for application passwords. I
 
 ## Updates
 
-Sites update WP Deployer from this repo's GitHub releases, with an **Update** button in Dashboard › Updates and on the Plugins screen, auto-updates included. The repo is private, so each site needs a token:
+Sites update WP Deployer from this repo's GitHub releases, with an **Update** button in Dashboard › Updates and on the Plugins screen, auto-updates included. No token is needed.
 
-1. GitHub › Settings › Developer settings › **Fine-grained tokens** › Generate.
-   - **Repository access:** only `scbudgetweb/wp-deployer`.
-   - **Permissions:** *Contents: Read-only*.
-2. Add it to the site's `wp-config.php`:
-   ```php
-   define( 'WPD_GITHUB_TOKEN', 'github_pat_…' );
-   ```
-   Or paste it in **WP Deployer › Settings › Plugin updates**, where it's stored encrypted.
+A token is optional. Add one if the repo is ever made private, or if a server shares its IP with many sites and hits GitHub's limit of 60 anonymous API requests an hour. Create a fine-grained token limited to this repo with *Contents: Read-only*, then either add it to `wp-config.php`:
+
+```php
+define( 'WPD_GITHUB_TOKEN', 'github_pat_…' );
+```
+
+or paste it in **WP Deployer › Settings › Plugin updates**, where it's stored encrypted.
 
 WordPress checks every 12 hours, and the plugin caches GitHub's answer for 6. **Dashboard › Updates › Check again** checks immediately.
+
+**Development copies:** a copy of the plugin that is a git checkout (has a `.git` folder) is never offered updates, so WordPress can't replace it with a zip.
 
 ## Releasing
 
@@ -78,3 +79,7 @@ The Release workflow checks the tag matches the plugin version and builds `wp-de
 - Deleting items, and pushing in the other direction (pull)
 - Theme and plugin **code**: deploy those files separately (rsync/Deployer)
 - Users, comments, form entries, WooCommerce data: deliberately never synced
+
+## Licence
+
+GPL-2.0-or-later. See [LICENSE](LICENSE).

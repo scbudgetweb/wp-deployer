@@ -250,7 +250,7 @@ class WPD_Admin {
 							<input type="password" id="wpd-gh-token" name="github_token" class="regular-text" autocomplete="new-password" placeholder="<?php echo empty( $s['github_token_enc'] ) ? 'github_pat_…' : 'Saved — leave blank to keep'; ?>">
 							<?php if ( ! empty( $s['github_token_enc'] ) ) : ?><label><input type="checkbox" name="github_token_remove" value="1"> Remove</label><?php endif; ?>
 						<?php endif; ?>
-						<p class="description">Updates come from the latest release of <code><?php echo esc_html( WPD_Updater::REPO ); ?></code>, which is private, so each site needs a fine-grained token limited to that repository with <em>Contents: Read-only</em>. Putting <code>define( 'WPD_GITHUB_TOKEN', '…' );</code> in wp-config.php keeps it out of the database; otherwise save it here (stored encrypted).</p>
+						<p class="description">Optional. Updates come from the latest release of <code><?php echo esc_html( WPD_Updater::REPO ); ?></code> on GitHub, and need no token. A token (fine-grained, <em>Contents: Read-only</em>) only helps if the repo is private, or if this server shares its IP with many other sites and hits GitHub's limit on anonymous requests. Putting <code>define( 'WPD_GITHUB_TOKEN', '…' );</code> in wp-config.php keeps it out of the database; otherwise save it here (stored encrypted).</p>
 					</td>
 				</tr>
 			</table>

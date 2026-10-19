@@ -4,9 +4,9 @@
  * Plugins screen like any other plugin update. The release must have a wp-deployer-*.zip asset (the release
  * workflow attaches one).
  *
- * The repo is private, so each site needs a GitHub token with read access to its contents: either the
- * WPD_GITHUB_TOKEN constant in wp-config.php (preferred) or the token field in WP Deployer › Settings. A
- * public repo needs no token.
+ * No token is needed for a public repo. A GitHub token (WPD_GITHUB_TOKEN in wp-config.php, or the token field
+ * in WP Deployer › Settings) is only needed if the repo is private, or to avoid GitHub's limit of 60
+ * unauthenticated API requests per hour per IP address on busy shared hosting.
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -63,7 +63,7 @@ class WPD_Updater {
 		$code = wp_remote_retrieve_response_code( $res );
 		$body = json_decode( wp_remote_retrieve_body( $res ), true );
 		if ( is_wp_error( $res ) || 200 !== $code || ! is_array( $body ) ) {
-			$msg = is_wp_error( $res ) ? $res->get_error_message() : ( 404 === $code ? 'Release not found. The repo is private: add a GitHub token (WPD_GITHUB_TOKEN) with read access to ' . self::REPO . '.' : ( 401 === $code ? 'The GitHub token was rejected (expired or revoked?).' : 'GitHub returned HTTP ' . $code . '.' ) );
+			$msg = is_wp_error( $res ) ? $res->get_error_message() : ( 404 === $code ? 'No release found on ' . self::REPO . '. If the repo is private, add a GitHub token (WPD_GITHUB_TOKEN) with read access to it.' : ( 401 === $code ? 'The GitHub token was rejected (expired or revoked?).' : ( 403 === $code || 429 === $code ? 'GitHub rate limit reached for this server; it will retry later (a GitHub token avoids this).' : 'GitHub returned HTTP ' . $code . '.' ) ) );
 			set_site_transient( self::TRANSIENT, array( 'error' => $msg ), 30 * MINUTE_IN_SECONDS );
 			return new WP_Error( 'wpd_update', $msg );
 		}
