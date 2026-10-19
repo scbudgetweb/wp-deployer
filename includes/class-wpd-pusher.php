@@ -200,15 +200,23 @@ class WPD_Pusher {
 			}
 		}
 
-		if ( ! $dry_run ) {
+		if ( ! $dry_run && $uploads ) {
+			$remote = $client->request( 'GET', '/handshake', null, 30 );
+			$chunk  = WPD_Setup::chunk_size( is_wp_error( $remote ) ? array() : $remote );
 			foreach ( $uploads as $rel => $overwrite ) {
-				$bytes = file_get_contents( $basedir . '/' . $rel ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-				$r     = $client->request( 'POST', '/files', array(
-					'path'      => $rel,
-					'sha1'      => $files[ $rel ],
-					'overwrite' => $overwrite,
-					'data'      => base64_encode( $bytes ),
-				), 300 );
+				$abs  = $basedir . '/' . $rel;
+				$body = array( 'path' => $rel, 'sha1' => $files[ $rel ], 'overwrite' => $overwrite );
+				if ( filesize( $abs ) > $chunk ) {
+					$id = WPD_Setup::upload_chunked( $client, $abs, $chunk );
+					if ( is_wp_error( $id ) ) {
+						$file_notes[] = $id->get_error_message();
+						continue;
+					}
+					$body['upload_id'] = $id;
+				} else {
+					$body['data'] = base64_encode( file_get_contents( $abs ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+				}
+				$r = $client->request( 'POST', '/files', $body, 300 );
 				if ( is_wp_error( $r ) ) {
 					$file_notes[] = $r->get_error_message();
 				}

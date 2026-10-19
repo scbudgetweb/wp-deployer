@@ -16,6 +16,36 @@ Images and upload files referenced by pushed items travel with them, together wi
 
 Nothing is ever deleted on a target.
 
+## Set up a new site
+
+Turn a fresh WordPress install into a copy of this site in one go, instead of using a migration plugin.
+
+1. Install WordPress on the new URL and install WP Deployer there.
+2. On the new site, tick **Receive pushes** and create an application password.
+3. Add it as a target here and open **Push**. Because the target is a fresh install (no pushes yet, only WordPress's sample content, an empty media library), a **Set up new site** panel appears.
+4. Untick any theme or plugin you don't want installed, type the target's domain to confirm, and run it.
+
+Setup does the following, one step at a time with progress on screen:
+
+- Installs the theme (and its parent) and the ticked plugins, using WordPress's own installer. Plugins already there at the same version are skipped.
+- Activates the plugins that are active here, and switches to this site's theme.
+- Copies site settings: title, tagline, language (installing its language pack), timezone, date formats, permalinks, reading, discussion and media sizes. Search engine visibility is left as it is on the target.
+- Pushes every enabled item plus the whole media library.
+- Deletes WordPress's sample post and page, and flushes permalinks.
+
+Afterwards the site is linked, and later pushes only send changes. Large files upload in 4 MB chunks.
+
+**Not copied:**
+
+- **Users.** Everything created on the new site is credited to its administrator, and the panel lists the users to recreate.
+- Must-use plugins. LiveCanvas recreates its own.
+- Data in plugins' own database tables, such as form entries.
+- `wp-config.php`.
+
+For WooCommerce or membership sites, use a full migration tool instead.
+
+The target refuses setup if it isn't fresh or the typed domain doesn't match. It also refuses if it can't install code: `DISALLOW_FILE_MODS`, or a host that needs FTP credentials. In that case, install the theme and plugins by hand and use a normal push.
+
 ## How matching works
 
 Each pushed object gets a UUID (`_wpd_uuid` post/term meta). On the first push the target matches by post type + slug, attachment file path or menu slug, and adopts the UUID. After that, matching is by UUID.

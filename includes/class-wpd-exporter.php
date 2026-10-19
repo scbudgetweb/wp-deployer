@@ -85,21 +85,44 @@ class WPD_Exporter {
 	}
 
 	public function export_meta( $id ) {
-		$skip = array_merge( WPD_Settings::INTERNAL_META, WPD_Settings::protected_meta() );
-		$ids  = WPD_Portable::id_meta_keys();
-		$out  = array();
+		$skip  = array_merge( WPD_Settings::INTERNAL_META, WPD_Settings::protected_meta() );
+		$ids   = WPD_Portable::id_meta_keys();
+		$selfs = WPD_Portable::self_id_paths();
+		$selfs = isset( $selfs[ get_post_type( $id ) ] ) ? $selfs[ get_post_type( $id ) ] : array();
+		$out   = array();
 		foreach ( get_post_meta( $id ) as $key => $values ) {
 			if ( WPD_Settings::matches( $key, $skip ) ) {
 				continue;
 			}
 			$out[ $key ] = array();
 			foreach ( $values as $raw ) {
-				$v             = maybe_unserialize( $raw );
+				$v = maybe_unserialize( $raw );
+				if ( isset( $selfs[ $key ] ) && is_array( $v ) ) {
+					foreach ( $selfs[ $key ] as $path ) {
+						$v = $this->replace_self_id( $v, $path, (int) $id );
+					}
+				}
 				$out[ $key ][] = in_array( $key, $ids, true ) && is_numeric( $v ) ? $this->portable->id_token( $v ) : $this->portable->tokenise( $v );
 			}
 		}
 		ksort( $out );
 		return $out;
+	}
+
+	/** Swap the post's own ID at a key path for a token (left alone if the path holds something else). */
+	private function replace_self_id( array $v, array $path, $id ) {
+		$key = array_shift( $path );
+		if ( ! array_key_exists( $key, $v ) ) {
+			return $v;
+		}
+		if ( $path ) {
+			if ( is_array( $v[ $key ] ) ) {
+				$v[ $key ] = $this->replace_self_id( $v[ $key ], $path, $id );
+			}
+		} elseif ( is_numeric( $v[ $key ] ) && (int) $v[ $key ] === $id ) {
+			$v[ $key ] = $this->portable->id_token( $id );
+		}
+		return $v;
 	}
 
 	public function export_attachment( $id ) {

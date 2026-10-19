@@ -21,3 +21,7 @@
 .wpd .wpd-sources .count { color: #646970; }
 .wpd .wpd-unavailable { opacity: .55; }
 .wpd .wpd-history details { margin-top: 4px; }
+.wpd .wpd-setup { border-left: 4px solid #2271b1; }
+.wpd .wpd-setup .wpd-pkg { display: block; margin: 6px 0; }
+.wpd .wpd-setup-log li { margin: 4px 0; }
+.wpd .wpd-fail { color: #b32d2e; }

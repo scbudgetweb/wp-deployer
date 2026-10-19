@@ -8,11 +8,15 @@
  *   POST /files/check   which upload files are missing or different
  *   POST /files         receive one upload file
  *   POST /import        plan (dry_run) or apply a push
+ *   POST /chunk         one chunk of a large upload (media file or setup package)
+ *   POST /setup/start|package|activate|settings|finish   "Set up new site" steps (WPD_Setup)
  *
  * Local (this site's own admin screens, cookie + nonce):
  *   GET  /local/status?env=   compare with a target
  *   POST /local/push          { env, uuids[], dry_run, force[] }
  *   POST /local/test          { env }
+ *   GET  /local/setup/plan?env=   what "Set up new site" would send
+ *   POST /local/setup/step    { env, step, … }
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -55,6 +59,14 @@ class WPD_Rest {
 			array( '/files/check', 'POST', 'files_check', $receive ),
 			array( '/files', 'POST', 'files', $receive ),
 			array( '/import', 'POST', 'import', $receive ),
+			array( '/chunk', 'POST', 'chunk', $receive ),
+			array( '/setup/start', 'POST', 'setup_start', $receive ),
+			array( '/setup/package', 'POST', 'setup_package', $receive ),
+			array( '/setup/activate', 'POST', 'setup_activate', $receive ),
+			array( '/setup/settings', 'POST', 'setup_settings', $receive ),
+			array( '/setup/finish', 'POST', 'setup_finish', $receive ),
+			array( '/local/setup/plan', 'GET', 'local_setup_plan', $local ),
+			array( '/local/setup/step', 'POST', 'local_setup_step', $local ),
 			array( '/local/status', 'GET', 'local_status', $local ),
 			array( '/local/push', 'POST', 'local_push', $local ),
 			array( '/local/test', 'POST', 'local_test', $local ),
@@ -89,6 +101,7 @@ class WPD_Rest {
 			'css_bundle' => $bundle && is_file( $bundle ),
 			'history'    => admin_url( 'admin.php?page=wpd-history' ),
 			'max_upload' => wp_max_upload_size(),
+			'setup'      => array_merge( WPD_Setup::freshness(), array( 'blocker' => WPD_Setup::install_blocker(), 'inventory' => WPD_Setup::inventory() ) ),
 		);
 	}
 
@@ -104,13 +117,37 @@ class WPD_Rest {
 	}
 
 	public static function files( WP_REST_Request $req ) {
-		$r = WPD_Importer::receive_file( $req->get_param( 'path' ), $req->get_param( 'data' ), $req->get_param( 'sha1' ), (bool) $req->get_param( 'overwrite' ) );
+		$r = WPD_Importer::receive_file( $req->get_param( 'path' ), $req->get_param( 'data' ), $req->get_param( 'sha1' ), (bool) $req->get_param( 'overwrite' ), (string) $req->get_param( 'upload_id' ) );
 		return is_wp_error( $r ) ? $r : array( 'result' => $r );
 	}
 
 	public static function import( WP_REST_Request $req ) {
 		$package = $req->get_json_params();
 		return WPD_Importer::import( is_array( $package ) ? $package : array(), ! empty( $package['dry_run'] ) );
+	}
+
+	public static function chunk( WP_REST_Request $req ) {
+		return WPD_Setup::receive_chunk( $req->get_param( 'upload_id' ), (int) $req->get_param( 'index' ), $req->get_param( 'data' ) );
+	}
+
+	public static function setup_start( WP_REST_Request $req ) {
+		return WPD_Setup::start( (string) $req->get_param( 'confirm' ) );
+	}
+
+	public static function setup_package( WP_REST_Request $req ) {
+		return WPD_Setup::install_package( 'theme' === $req->get_param( 'type' ) ? 'theme' : 'plugin', (string) $req->get_param( 'upload_id' ), (string) $req->get_param( 'sha1' ) );
+	}
+
+	public static function setup_activate( WP_REST_Request $req ) {
+		return WPD_Setup::activate( array_map( 'strval', (array) $req->get_param( 'plugins' ) ), (string) $req->get_param( 'stylesheet' ) );
+	}
+
+	public static function setup_settings( WP_REST_Request $req ) {
+		return WPD_Setup::apply_settings( (array) $req->get_param( 'options' ) );
+	}
+
+	public static function setup_finish() {
+		return WPD_Setup::finish();
 	}
 
 	/* ---------- local ---------- */
@@ -125,6 +162,15 @@ class WPD_Rest {
 			return new WP_Error( 'wpd_empty', 'Nothing selected.', array( 'status' => 400 ) );
 		}
 		return WPD_Pusher::push( (string) $req->get_param( 'env' ), $uuids, (bool) $req->get_param( 'dry_run' ), array_map( 'strval', (array) $req->get_param( 'force' ) ) );
+	}
+
+	public static function local_setup_plan( WP_REST_Request $req ) {
+		return WPD_Setup::plan( (string) $req->get_param( 'env' ) );
+	}
+
+	public static function local_setup_step( WP_REST_Request $req ) {
+		$params = (array) $req->get_json_params();
+		return WPD_Setup::step( (string) $req->get_param( 'env' ), (string) $req->get_param( 'step' ), $params );
 	}
 
 	public static function local_test( WP_REST_Request $req ) {

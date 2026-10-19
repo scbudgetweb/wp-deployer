@@ -146,12 +146,21 @@ class WPD_Importer {
 		return $out;
 	}
 
-	public static function receive_file( $rel, $data_b64, $sha1, $overwrite ) {
+	public static function receive_file( $rel, $data_b64, $sha1, $overwrite, $upload_id = '' ) {
 		$path = self::upload_path( $rel );
 		if ( is_wp_error( $path ) ) {
 			return $path;
 		}
-		$bytes = base64_decode( (string) $data_b64, true );
+		if ( '' !== $upload_id ) {
+			$part = WPD_Setup::take_upload( $upload_id, $sha1 );
+			if ( is_wp_error( $part ) ) {
+				return $part;
+			}
+			$bytes = file_get_contents( $part ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			wp_delete_file( $part );
+		} else {
+			$bytes = base64_decode( (string) $data_b64, true );
+		}
 		if ( false === $bytes || sha1( $bytes ) !== $sha1 ) {
 			return new WP_Error( 'wpd_hash', 'File arrived damaged (checksum mismatch): ' . $rel );
 		}

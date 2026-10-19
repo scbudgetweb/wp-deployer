@@ -57,6 +57,19 @@ class WPD_Portable {
 		return apply_filters( 'wpd_id_meta_keys', array( '_thumbnail_id' ) );
 	}
 
+	/**
+	 * Places where a post stores its own ID inside its meta: post type => meta key => list of key paths.
+	 * Forminator, for one, keeps the form's ID in settings.form_id and uses it in field IDs.
+	 */
+	public static function self_id_paths() {
+		$forminator = array( 'forminator_form_meta' => array( array( 'settings', 'form_id' ) ) );
+		return apply_filters( 'wpd_self_id_paths', array(
+			'forminator_forms'   => $forminator,
+			'forminator_polls'   => $forminator,
+			'forminator_quizzes' => $forminator,
+		) );
+	}
+
 	/* ================= sending side ================= */
 
 	/** Tokenise any value (strings inside arrays too). */

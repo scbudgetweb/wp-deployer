@@ -94,6 +94,9 @@
 			busy( false );
 			notice( text, 'success' );
 			render();
+			if ( target.setup && ( target.setup.fresh || target.setup.in_progress ) ) {
+				await setupPanel();
+			}
 		} catch ( e ) {
 			busy( false );
 			notice( esc( e.message ), 'error' );
@@ -154,6 +157,102 @@
 		} catch ( e ) {
 			busy( false );
 			notice( esc( e.message ), 'error' );
+		}
+	}
+
+	/* ---------- Set up new site ---------- */
+
+	const kb = ( n ) => ( n > 1048576 ? ( n / 1048576 ).toFixed( 1 ) + ' MB' : Math.max( 1, Math.round( n / 1024 ) ) + ' KB' );
+
+	async function setupPanel() {
+		let plan;
+		try {
+			plan = await api( '/local/setup/plan?env=' + encodeURIComponent( env.value ) );
+		} catch ( e ) {
+			notice( esc( e.message ), 'error' );
+			return;
+		}
+		const s = plan.remote.setup;
+		const pkgRow = ( p, extra ) => {
+			const same = p.there && p.there === p.version;
+			return '<label class="wpd-pkg"><input type="checkbox" class="wpd-setup-pkg" value="' + esc( p.key ) + '"' + ( same ? '' : ' checked' ) + '> <strong>' + esc( p.name ) + '</strong> ' + esc( p.version ) +
+				' <span class="description">' + kb( p.size ) + ( extra ? ' · ' + extra : '' ) + ( p.there ? ' · on target: ' + esc( p.there ) + ( same ? ' (same, skipped)' : '' ) : '' ) + '</span></label>';
+		};
+		const others = plan.users.filter( ( u ) => u !== s.user );
+		let html = '<div class="wpd-panel wpd-setup"><h2>Set up new site</h2>' +
+			'<p><strong>' + esc( plan.remote.name ) + '</strong> (' + esc( plan.remote.home ) + ') is a fresh WordPress install. Set it up as a copy of this site: install the theme and plugins, copy the site settings and permalinks, push all content and the whole media library, and remove WordPress\'s sample post and page. Afterwards it is linked, so later pushes only send changes.</p>' +
+			'<div class="notice notice-warning inline"><p><strong>Users are not copied.</strong> Everything created on ' + esc( plan.remote.name ) + ' is credited to its administrator <strong>' + esc( s.user ) + '</strong>.' +
+			( others.length ? ' This site has ' + plan.user_count + ' user(s); recreate any you need there (Users › Add New): ' + others.map( esc ).join( ', ' ) + '.' : '' ) + '</p></div>' +
+			( s.blocker ? '<div class="notice notice-error inline"><p>' + esc( s.blocker ) + '</p></div>' : '' ) +
+			'<h3>Theme</h3>' + plan.themes.map( ( t ) => pkgRow( t, t.role === 'parent' ? 'parent theme' : 'active theme' ) ).join( '' ) +
+			'<h3>Plugins</h3>' + plan.plugins.map( ( p ) => pkgRow( p, p.active ? 'activated' : 'installed, left inactive' ) ).join( '' ) +
+			( plan.mu_plugins.length ? '<p class="description">Must-use plugins are not copied (' + plan.mu_plugins.map( esc ).join( ', ' ) + '). Plugins that create their own, such as LiveCanvas, recreate them when activated.</p>' : '' ) +
+			'<h3>Content</h3><p>' + plan.items + ' item(s) from the enabled sources, and ' + plan.media + ' media library item(s). Search engine visibility (Settings › Reading) is left as it is on the target.</p>' +
+			'<p><label>Type <code>' + esc( plan.host ) + '</code> to confirm: <input type="text" id="wpd-setup-confirm" autocomplete="off"></label> ' +
+			'<button type="button" class="button button-primary" id="wpd-setup-run"' + ( s.blocker ? ' disabled' : '' ) + '>Set up ' + esc( plan.remote.name ) + '</button></p>' +
+			'<ol id="wpd-setup-log" class="wpd-setup-log"></ol></div>';
+		list.insertAdjacentHTML( 'afterbegin', html );
+		$( 'wpd-setup-run' ).addEventListener( 'click', () => runSetup( plan ) );
+	}
+
+	async function runSetup( plan ) {
+		const confirm = $( 'wpd-setup-confirm' ).value.trim().toLowerCase();
+		if ( confirm !== plan.host.toLowerCase() ) {
+			notice( 'Type ' + esc( plan.host ) + ' exactly to confirm.', 'warning' );
+			return;
+		}
+		const picked = [ ...list.querySelectorAll( 'input.wpd-setup-pkg:checked' ) ].map( ( c ) => c.value );
+		const pkgs = [ ...plan.themes, ...plan.plugins ].filter( ( p ) => picked.includes( p.key ) );
+		const log = $( 'wpd-setup-log' );
+		const line = ( text ) => {
+			const li = document.createElement( 'li' );
+			li.innerHTML = '<span class="spinner is-active"></span> ' + esc( text );
+			log.appendChild( li );
+			return {
+				ok: ( t ) => ( li.innerHTML = '✓ ' + esc( t || text ) ),
+				fail: ( t ) => ( li.innerHTML = '<strong class="wpd-fail">✗ ' + esc( text ) + ': ' + esc( t ) + '</strong>' ),
+			};
+		};
+		const step = ( name, extra ) => api( '/local/setup/step', Object.assign( { env: env.value, step: name }, extra || {} ) );
+		Object.values( btn ).forEach( ( b ) => ( b.disabled = true ) );
+		$( 'wpd-setup-run' ).disabled = true;
+		notice( '' );
+		try {
+			let l = line( 'Checking ' + plan.remote.name );
+			await step( 'start', { confirm } );
+			l.ok( plan.remote.name + ' is ready' );
+			for ( const p of pkgs ) {
+				l = line( 'Installing ' + p.name + ' (' + kb( p.size ) + ')' );
+				try {
+					await step( 'package', { key: p.key } );
+					l.ok( 'Installed ' + p.name + ' ' + p.version );
+				} catch ( e ) {
+					l.fail( e.message );
+				}
+			}
+			l = line( 'Activating plugins and theme' );
+			const onTarget = plan.plugins.filter( ( p ) => picked.includes( p.key ) || p.there );
+			const act = await step( 'activate', { plugins: onTarget.map( ( p ) => p.key.slice( 7 ) ) } );
+			const failed = Object.entries( act.failed || {} );
+			failed.length ? l.fail( failed.map( ( [ k, v ] ) => k + ': ' + v ).join( '; ' ) ) : l.ok( 'Activated ' + act.activated.length + ' plugin(s); theme ' + act.theme );
+			l = line( 'Copying site settings and permalinks' );
+			await step( 'settings' );
+			l.ok();
+			l = line( 'Pushing content and media (this is the long one)' );
+			const r = await step( 'content' );
+			l.ok( 'Content pushed: ' + Object.entries( r.counts || {} ).map( ( [ k, v ] ) => v + ' ' + k ).join( ', ' ) + ( r.files ? ' · ' + r.files.to_upload + ' file(s) uploaded' : '' ) );
+			l = line( 'Tidying up' );
+			const f = await step( 'finish' );
+			l.ok( f.deleted.length ? 'Removed ' + f.deleted.join( ', ' ) : 'Done' );
+			const keep = '<div class="wpd-panel"><h2>' + esc( plan.remote.name ) + ' is set up</h2><p><a href="' + esc( f.home ) + '" target="_blank" rel="noopener">Open ' + esc( f.home ) + ' ↗</a>' +
+				( r.warnings && r.warnings.length ? '</p><div class="notice notice-warning inline"><ul>' + r.warnings.map( ( w ) => '<li>' + esc( w ) + '</li>' ).join( '' ) + '</ul></div>' : '</p>' ) +
+				'<p>Remember to recreate users there. From now on, push changes as usual.</p></div>';
+			await load();
+			out.innerHTML = keep;
+		} catch ( e ) {
+			line( 'Setup stopped' ).fail( e.message );
+			notice( 'Setup stopped: ' + esc( e.message ) + ' Fix the problem and run it again; finished steps are skipped or repeated safely.', 'error' );
+			busy( false );
 		}
 	}
 
