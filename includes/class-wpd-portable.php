@@ -28,6 +28,7 @@ class WPD_Portable {
 
 	private $url_pairs;
 	private $upload_index;
+	private $uploads_path;
 
 	public function __construct() {
 		$this->url_pairs = array();
@@ -133,11 +134,24 @@ class WPD_Portable {
 		return $s;
 	}
 
+	/**
+	 * Collect upload files referenced by full URL (already tokenised) or by root-relative path
+	 * ("/wp-content/uploads/…", which works unchanged on the target, so it is not tokenised).
+	 */
 	private function collect_upload_refs( $s ) {
-		if ( false === strpos( $s, '{{wpd:uploads' ) ) {
+		if ( null === $this->uploads_path ) {
+			$this->uploads_path = untrailingslashit( (string) wp_parse_url( wp_get_upload_dir()['baseurl'], PHP_URL_PATH ) );
+		}
+		$rel_path = '' !== $this->uploads_path ? $this->uploads_path : null;
+		if ( false === strpos( $s, '{{wpd:uploads' ) && ( ! $rel_path || ( false === strpos( $s, $rel_path ) && false === strpos( $s, str_replace( '/', '\/', $rel_path ) ) ) ) ) {
 			return;
 		}
-		if ( ! preg_match_all( '#\{\{wpd:uploads(?:_esc)?\}\}((?:\\\\?/[A-Za-z0-9._\-%@+~]+)+)#', $s, $m ) ) {
+		$prefix = '\{\{wpd:uploads(?:_esc)?\}\}';
+		if ( $rel_path ) {
+			$quoted  = preg_quote( $rel_path, '#' );
+			$prefix .= '|(?<![A-Za-z0-9._\-}])' . $quoted . '|(?<![A-Za-z0-9._\-}])' . str_replace( '/', '\\\\/', $quoted );
+		}
+		if ( ! preg_match_all( '#(?:' . $prefix . ')((?:\\\\?/[A-Za-z0-9._\-%@+~]+)+)#', $s, $m ) ) {
 			return;
 		}
 		$index   = $this->upload_index();
