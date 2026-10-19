@@ -225,6 +225,33 @@ class WPD_Admin {
 			<label><input type="checkbox" name="receive" value="1" <?php checked( $s['receive'] ); ?>> <strong>Receive pushes</strong> — let administrators of this site push to it from another site, using an application password.</label>
 			<p class="description">Tick this on staging and production. Leave it off on your local site.</p>
 
+			<h2>Plugin updates</h2>
+			<?php
+			$release = WPD_Updater::latest();
+			if ( is_wp_error( $release ) ) {
+				echo '<p class="description"><span class="wpd-badge wpd-failed">Can\'t check</span> ' . esc_html( $release->get_error_message() ) . '</p>';
+			} else {
+				$newer = version_compare( $release['version'], WPD_VERSION, '>' );
+				echo '<p>Installed: <strong>' . esc_html( WPD_VERSION ) . '</strong> · Latest on GitHub: <a href="' . esc_url( $release['url'] ) . '" target="_blank" rel="noopener">' . esc_html( $release['tag'] ) . '</a> ';
+				echo $newer ? '<span class="wpd-badge wpd-new">Update available</span> <a href="' . esc_url( admin_url( 'plugins.php' ) ) . '">Plugins</a>' : '<span class="wpd-badge wpd-done">Up to date</span>';
+				echo '</p>';
+			}
+			?>
+			<table class="form-table">
+				<tr>
+					<th scope="row"><label for="wpd-gh-token">GitHub token</label></th>
+					<td>
+						<?php if ( defined( 'WPD_GITHUB_TOKEN' ) && WPD_GITHUB_TOKEN ) : ?>
+							<p>Set in <code>wp-config.php</code> (<code>WPD_GITHUB_TOKEN</code>).</p>
+						<?php else : ?>
+							<input type="password" id="wpd-gh-token" name="github_token" class="regular-text" autocomplete="new-password" placeholder="<?php echo empty( $s['github_token_enc'] ) ? 'github_pat_…' : 'Saved — leave blank to keep'; ?>">
+							<?php if ( ! empty( $s['github_token_enc'] ) ) : ?><label><input type="checkbox" name="github_token_remove" value="1"> Remove</label><?php endif; ?>
+						<?php endif; ?>
+						<p class="description">Updates come from the latest release of <code><?php echo esc_html( WPD_Updater::REPO ); ?></code>, which is private, so each site needs a fine-grained token limited to that repository with <em>Contents: Read-only</em>. Putting <code>define( 'WPD_GITHUB_TOKEN', '…' );</code> in wp-config.php keeps it out of the database; otherwise save it here (stored encrypted).</p>
+					</td>
+				</tr>
+			</table>
+
 			<?php submit_button( 'Save settings' ); ?>
 		</form>
 		</div>
@@ -268,6 +295,13 @@ class WPD_Admin {
 		$s['theme_mod_patterns'] = sanitize_textarea_field( wp_unslash( isset( $_POST['theme_mod_patterns'] ) ? $_POST['theme_mod_patterns'] : '' ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 		$s['option_patterns']    = sanitize_textarea_field( wp_unslash( isset( $_POST['option_patterns'] ) ? $_POST['option_patterns'] : '' ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 		$s['receive']            = ! empty( $_POST['receive'] );
+		$token                   = isset( $_POST['github_token'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['github_token'] ) ) ) : '';
+		if ( ! empty( $_POST['github_token_remove'] ) ) {
+			$s['github_token_enc'] = '';
+		} elseif ( '' !== $token ) {
+			$s['github_token_enc'] = WPD_Settings::encrypt( $token );
+		}
+		delete_site_transient( WPD_Updater::TRANSIENT );
 		WPD_Settings::update( $s );
 		wp_safe_redirect( admin_url( 'admin.php?page=wpd-settings&updated=1' ) );
 		exit;

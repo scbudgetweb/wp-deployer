@@ -47,6 +47,32 @@ IDs and URLs inside content are made portable on the way out and resolved on arr
 
 The target must use HTTPS, which WordPress requires for application passwords. If the host strips the `Authorization` header (some Apache + FastCGI setups), the plugin also sends credentials as `X-WPD-Auth`, and the receiving side accepts either.
 
+## Updates
+
+Sites update WP Deployer from this repo's GitHub releases, with an **Update** button in Dashboard › Updates and on the Plugins screen, auto-updates included. The repo is private, so each site needs a token:
+
+1. GitHub › Settings › Developer settings › **Fine-grained tokens** › Generate.
+   - **Repository access:** only `scbudgetweb/wp-deployer`.
+   - **Permissions:** *Contents: Read-only*.
+2. Add it to the site's `wp-config.php`:
+   ```php
+   define( 'WPD_GITHUB_TOKEN', 'github_pat_…' );
+   ```
+   Or paste it in **WP Deployer › Settings › Plugin updates**, where it's stored encrypted.
+
+WordPress checks every 12 hours, and the plugin caches GitHub's answer for 6. **Dashboard › Updates › Check again** checks immediately.
+
+## Releasing
+
+1. Bump the version in `wp-deployer.php` (both the `Version:` header and `WPD_VERSION`) and commit.
+2. Tag and push:
+   ```
+   git tag -a v0.3.0 -m "WP Deployer 0.3.0" -m "Release notes…"
+   git push origin main v0.3.0
+   ```
+
+The Release workflow checks the tag matches the plugin version and builds `wp-deployer-0.3.0.zip`. It then publishes the release, using the tag message as the notes. Sites offer the update from there.
+
 ## Not covered (yet)
 
 - Deleting items, and pushing in the other direction (pull)
