@@ -1,3 +1,5 @@
+<a href="https://buymeacoffee.com/shaunn"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="50"></a>
+
 # WP Deployer
 
 Push content and design changes from one WordPress site to another (local → staging → production) item by item, without replacing the receiving site's database. Form entries, users, comments, SEO data and plugin activation on the receiving site are left alone.
